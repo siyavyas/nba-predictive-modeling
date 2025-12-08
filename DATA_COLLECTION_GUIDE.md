@@ -2,7 +2,7 @@
 
 ## Quick Start
 
-### Collect Historical Data (2015-16 to 2023-24)
+### Collect Historical Data (2015-16 to 2024-25)
 ```bash
 python3 collect_data.py --historical
 ```
@@ -19,7 +19,7 @@ python3 collect_data.py --all
 
 ### Custom Season Range
 ```bash
-python3 collect_data.py --historical --start-season 2020-21 --end-season 2023-24
+python3 collect_data.py --historical --start-season 2020-21 --end-season 2024-25
 ```
 
 ## Data Structure
@@ -30,7 +30,7 @@ The collected data includes the following columns:
 - `Game_ID`: Unique game identifier
 - `GAME_DATE`: Date of the game
 - `MATCHUP`: Opponent (e.g., "GSW vs. LAL" or "GSW @ LAL")
-- `SEASON`: Season string (e.g., "2023-24")
+- `SEASON`: Season string (e.g., "2024-25")
 - `SEASON_TYPE`: "Regular Season" or "Playoffs"
 
 ### Game Outcome

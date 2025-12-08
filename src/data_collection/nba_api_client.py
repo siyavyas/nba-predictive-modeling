@@ -36,7 +36,7 @@ class NBAApiClient:
         Get team game log for a specific season.
         
         Args:
-            season: Season in format "YYYY-YY" (e.g., "2023-24")
+            season: Season in format "YYYY-YY" (e.g., "2024-25")
             season_type: "Regular Season" or "Playoffs"
         
         Returns:
@@ -65,7 +65,7 @@ class NBAApiClient:
     def get_historical_seasons(
         self, 
         start_season: str = "2015-16", 
-        end_season: str = "2023-24",
+        end_season: str = "2024-25",
         season_type: str = "Regular Season",
         show_progress: bool = True
     ) -> pd.DataFrame:

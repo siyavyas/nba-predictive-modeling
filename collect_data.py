@@ -15,13 +15,13 @@ from src.data_collection.data_loader import DataLoader
 from src.utils.config import CURRENT_SEASON, RAW_DATA_DIR
 
 
-def collect_historical_data(start_season: str = "2015-16", end_season: str = "2023-24"):
+def collect_historical_data(start_season: str = "2015-16", end_season: str = "2024-25"):
     """
     Collect historical Warriors game data.
     
     Args:
         start_season: Starting season (e.g., "2015-16")
-        end_season: Ending season (e.g., "2023-24")
+        end_season: Ending season (e.g., "2024-25")
     """
     print("Collecting Historical Warriors Game Data")
     print(f"Team: Golden State Warriors")
@@ -114,7 +114,7 @@ def main():
     parser.add_argument(
         '--historical',
         action='store_true',
-        help='Collect historical data (2015-16 to 2023-24)'
+        help='Collect historical data (2015-16 to 2024-25)'
     )
     parser.add_argument(
         '--current',
@@ -130,8 +130,8 @@ def main():
     parser.add_argument(
         '--end-season',
         type=str,
-        default='2023-24',
-        help='Ending season for historical data (default: 2023-24)'
+        default='2024-25',
+        help='Ending season for historical data (default: 2024-25)'
     )
     parser.add_argument(
         '--season',

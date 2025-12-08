@@ -61,7 +61,7 @@ nba-predictive-modeling/
 from src.data_collection.nba_api_client import NBAApiClient
 
 client = NBAApiClient()
-historical_data = client.get_historical_seasons("2015-16", "2023-24")
+historical_data = client.get_historical_seasons("2015-16", "2024-25")
 ```
 
 ### 2. Feature Engineering
