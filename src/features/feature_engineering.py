@@ -50,18 +50,19 @@ class FeatureEngineer:
             df['WIN'] = (df['WL'] == 'W').astype(int)
         
         # Point differential
-        # Note: NBA API team game log doesn't include opponent points directly
-        # We'll need to fetch this from boxscore data or calculate from win/loss
         if 'PTS' in df.columns and 'OPP_PTS' in df.columns:
             df['POINT_DIFF'] = df['PTS'] - df['OPP_PTS']
         elif 'PTS' in df.columns and 'PTS_OPP' in df.columns:
             df['POINT_DIFF'] = df['PTS'] - df['PTS_OPP']
+        elif 'PLUS_MINUS' in df.columns:
+            # Plus/minus is point differential, but need to verify sign
+            # For team game log, PLUS_MINUS should be point differential
+            df['POINT_DIFF'] = df['PLUS_MINUS']
         elif 'PTS' in df.columns and 'WL' in df.columns:
-            # Approximate: if win, assume positive diff; if loss, assume negative
-            # This is a placeholder - we'll enhance this later with actual boxscore data
-            df['POINT_DIFF'] = np.where(df['WL'] == 'W', 5, -5)  # Placeholder values
+            # If we have win/loss but no point diff, we'll need to estimate
+            df['POINT_DIFF'] = np.where(df['WL'] == 'W', 8, -8)  # Conservative estimate
         
-        # Field goal percentage
+        # Field goal percentage (recalculate to ensure consistency)
         if 'FGM' in df.columns and 'FGA' in df.columns:
             df['FG_PCT'] = df['FGM'] / df['FGA'].replace(0, np.nan)
         
@@ -73,15 +74,40 @@ class FeatureEngineer:
         if 'FTM' in df.columns and 'FTA' in df.columns:
             df['FT_PCT'] = df['FTM'] / df['FTA'].replace(0, np.nan)
         
+        # True shooting percentage (approximate)
+        if 'PTS' in df.columns and 'FGA' in df.columns and 'FTA' in df.columns:
+            df['TSA'] = df['FGA'] + 0.44 * df['FTA']  # True shot attempts
+            df['TS_PCT'] = df['PTS'] / (2 * df['TSA'].replace(0, np.nan))
+        
+        # Effective field goal percentage
+        if 'FGM' in df.columns and 'FG3M' in df.columns and 'FGA' in df.columns:
+            df['EFG_PCT'] = (df['FGM'] + 0.5 * df['FG3M']) / df['FGA'].replace(0, np.nan)
+        
+        # Assist to turnover ratio
+        if 'AST' in df.columns and 'TOV' in df.columns:
+            df['AST_TOV_RATIO'] = df['AST'] / df['TOV'].replace(0, np.nan)
+        
+        # Rebound rate (offensive rebounds / total rebounds)
+        if 'OREB' in df.columns and 'REB' in df.columns:
+            df['OREB_PCT'] = df['OREB'] / df['REB'].replace(0, np.nan)
+        
         return df
     
     def _add_rolling_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        key_features = [
+            'PTS', 'FG_PCT', 'FG3_PCT', 'FT_PCT', 'REB', 'AST', 'TOV', 
+            'STL', 'BLK', 'PF', 'PLUS_MINUS', 'POINT_DIFF',
+            'TS_PCT', 'EFG_PCT', 'AST_TOV_RATIO'
+        ]
+        
+        # Only use features that exist in the dataframe
+        available_features = [col for col in key_features if col in df.columns]
         
         for window in self.rolling_windows:
-            for col in numeric_cols:
-                if col not in ['WIN', 'POINT_DIFF']:  # Exclude target variables
-                    df[f'{col}_ROLLING_{window}'] = df[col].rolling(
+            for col in available_features:
+                if col not in ['WIN', 'POINT_DIFF']:  # Exclude target variables from rolling
+                    rolling_col = f'{col}_ROLLING_{window}'
+                    df[rolling_col] = df[col].rolling(
                         window=window, min_periods=1
                     ).mean().shift(1)  # Shift to avoid data leakage
         
@@ -112,15 +138,16 @@ class FeatureEngineer:
     
     def _add_streak_features(self, df: pd.DataFrame) -> pd.DataFrame:
         if 'WIN' in df.columns:
-            # Win streak
-            df['WIN_STREAK'] = (df['WIN'] == 1).groupby(
-                (df['WIN'] != df['WIN'].shift()).cumsum()
-            ).cumsum() * df['WIN']
+            # Win streak (current streak of wins)
+            win_groups = (df['WIN'] != df['WIN'].shift()).cumsum()
+            df['WIN_STREAK'] = (df['WIN'] == 1).groupby(win_groups).cumsum()
             
-            # Loss streak
-            df['LOSS_STREAK'] = ((df['WIN'] == 0).groupby(
-                (df['WIN'] != df['WIN'].shift()).cumsum()
-            ).cumsum() * (1 - df['WIN']))
+            # Loss streak (current streak of losses)
+            df['LOSS_STREAK'] = (df['WIN'] == 0).groupby(win_groups).cumsum()
+            
+            # Shift streaks to avoid data leakage (use previous game's streak)
+            df['WIN_STREAK'] = df['WIN_STREAK'].shift(1).fillna(0)
+            df['LOSS_STREAK'] = df['LOSS_STREAK'].shift(1).fillna(0)
         
         return df
 

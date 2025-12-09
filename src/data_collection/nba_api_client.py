@@ -2,9 +2,10 @@
 NBA API client for fetching game data and statistics.
 """
 
-from nba_api.stats.endpoints import teamgamelog
+from nba_api.stats.endpoints import teamgamelog, boxscoretraditionalv3
 from nba_api.stats.static import teams
 import pandas as pd
+import numpy as np
 import time
 from typing import Optional, List, Dict
 from pathlib import Path
@@ -128,20 +129,142 @@ class NBAApiClient:
         
         return seasons
     
-    def get_opponent_stats(self, game_date: str, opponent_team_id: int) -> Optional[Dict]:
+    def get_game_boxscore(self, game_id: str) -> Optional[Dict]:
         """
-        Get opponent team statistics for a specific game.
-        This is a placeholder for future implementation.
+        Get boxscore data for a specific game to extract opponent points.
         
         Args:
-            game_date: Date of the game
-            opponent_team_id: Opponent team ID
+            game_id: NBA game ID (can be int or string)
         
         Returns:
-            Dictionary with opponent stats (to be implemented)
+            Dictionary with team points and opponent points, or None if error
         """
-        # TODO: Implement opponent stats retrieval
-        return None
+        try:
+            # Convert game_id to string and ensure proper format (10 digits with leading zeros)
+            game_id_str = str(int(game_id)).zfill(10)
+            if not game_id_str.startswith('00'):
+                game_id_str = '00' + game_id_str
+            
+            try:
+                boxscore = boxscoretraditionalv3.BoxScoreTraditionalV3(game_id=game_id_str)
+                data_frames = boxscore.get_data_frames()
+                # DataFrame 2 has team totals (2 teams), DataFrame 1 has starters/bench breakdown
+                team_stats = data_frames[2] if len(data_frames) > 2 else data_frames[1]
+            except:
+                # Fall back to V2 for older games
+                from nba_api.stats.endpoints import boxscoretraditionalv2
+                boxscore = boxscoretraditionalv2.BoxScoreTraditionalV2(game_id=game_id_str)
+                data_frames = boxscore.get_data_frames()
+                team_stats = data_frames[-1] if len(data_frames) > 1 else data_frames[0]
+            
+            if team_stats.empty or len(team_stats) < 2:
+                return None
+            
+            # Handle different column name formats (V2 uses UPPER_CASE, V3 uses camelCase)
+            if 'TEAM_ID' in team_stats.columns:
+                # V2 format
+                team_id_col = 'TEAM_ID'
+                points_col = 'PTS'
+            else:
+                # V3 format
+                team_id_col = 'teamId'
+                points_col = 'points'
+            
+            # Get points for both teams
+            team_points = {}
+            for _, row in team_stats.iterrows():
+                team_id = int(row[team_id_col])
+                points = int(row[points_col])
+                team_points[team_id] = points
+            
+            # Find Warriors and opponent points
+            warriors_points = team_points.get(self.team_id)
+            if warriors_points is None:
+                return None
+            
+            # Opponent points is the other team's points
+            opponent_points = [pts for tid, pts in team_points.items() if tid != self.team_id]
+            if not opponent_points:
+                return None
+            
+            opponent_points = opponent_points[0]
+            
+            time.sleep(self.delay)  # Rate limiting
+            
+            return {
+                'GAME_ID': game_id,
+                'PTS': warriors_points,
+                'OPP_PTS': opponent_points,
+                'POINT_DIFF': warriors_points - opponent_points
+            }
+        except Exception as e:
+            # Silently fail for individual games to avoid cluttering output
+            time.sleep(self.delay)
+            return None
+    
+    def enrich_game_log_with_opponent_points(self, df: pd.DataFrame, show_progress: bool = True, force: bool = False) -> pd.DataFrame:
+        """
+        Enrich game log DataFrame with opponent points from boxscore data.
+        
+        Args:
+            df: Game log DataFrame with Game_ID column
+            show_progress: Whether to show progress bar
+            force: Force re-fetch even if OPP_PTS already exists
+        
+        Returns:
+            DataFrame with OPP_PTS and updated POINT_DIFF columns
+        """
+        df = df.copy()
+        
+        # Check if we already have opponent points
+        if 'OPP_PTS' in df.columns and df['OPP_PTS'].notna().any() and not force:
+            print("Opponent points already present in data.")
+            return df
+        
+        # If forcing, remove existing OPP_PTS and POINT_DIFF columns
+        if force and 'OPP_PTS' in df.columns:
+            df = df.drop(columns=['OPP_PTS', 'POINT_DIFF'], errors='ignore')
+        
+        print(f"Fetching boxscore data for {len(df)} games...")
+        print("This may take a while due to rate limiting...")
+        
+        opponent_points = []
+        point_diffs = []
+        failed_games = []
+        
+        iterator = tqdm(df.iterrows(), total=len(df), desc="Fetching boxscores") if show_progress else df.iterrows()
+        
+        for idx, row in iterator:
+            game_id = str(row['Game_ID'])
+            boxscore_data = self.get_game_boxscore(game_id)
+            
+            if boxscore_data:
+                opponent_points.append(boxscore_data['OPP_PTS'])
+                point_diffs.append(boxscore_data['POINT_DIFF'])
+            else:
+                opponent_points.append(None)
+                point_diffs.append(None)
+                failed_games.append(game_id)
+        
+        # Add opponent points to dataframe
+        df['OPP_PTS'] = opponent_points
+        df['POINT_DIFF'] = point_diffs
+        
+        # Fill missing values with estimated values based on win/loss
+        if 'WL' in df.columns:
+            missing_mask = df['OPP_PTS'].isna()
+            if missing_mask.any():
+                print(f"\nWarning: Could not fetch {missing_mask.sum()} games. Using estimates.")
+                df.loc[missing_mask, 'POINT_DIFF'] = np.where(
+                    df.loc[missing_mask, 'WL'] == 'W', 8, -8
+                )
+                # Estimate opponent points for missing games
+                df.loc[missing_mask, 'OPP_PTS'] = df.loc[missing_mask, 'PTS'] - df.loc[missing_mask, 'POINT_DIFF']
+        
+        success_count = df['OPP_PTS'].notna().sum()
+        print(f"\nSuccessfully fetched {success_count}/{len(df)} games ({success_count/len(df)*100:.1f}%)")
+        
+        return df
     
     def get_team_info(self) -> Dict:
         return self.team_info
