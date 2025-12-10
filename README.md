@@ -33,6 +33,9 @@ nba-predictive-modeling/
 │   ├── models/
 │   │   ├── base_model.py
 │   │   ├── model_trainer.py
+│   │   ├── random_forest_model.py
+│   │   ├── xgboost_model.py
+│   │   ├── lightgbm_model.py
 │   │   └── incremental_updater.py
 │   └── utils/
 │       ├── config.py
@@ -75,12 +78,52 @@ features_df = engineer.engineer_features(raw_data)
 
 ### 3. Model Training
 
-```python
-from src.models.model_trainer import ModelTrainer
-# Import your specific model implementation
+**Using the training script:**
+```bash
+# Train both classification and regression models
+python train_models.py --target both
 
+# Train only classification models (win/loss)
+python train_models.py --target win
+
+# Train only regression models (point differential)
+python train_models.py --target point_diff
+
+# Specify custom input file and test size
+python train_models.py --input data/processed/your_file.csv --test-size 0.25
+```
+
+**Using the optimization script (with hyperparameter tuning and feature selection):**
+```bash
+# Optimize both classification and regression models
+python optimize_models.py --target both
+
+# Optimize with custom parameters
+python optimize_models.py --target both --cv 5 --feature-k 20
+
+# Optimize only classification models
+python optimize_models.py --target win --cv 3
+```
+
+**Using the Python API:**
+```python
+from src.models import RandomForestModel, XGBoostModel, LightGBMModel, ModelTrainer
+from src.data_collection.data_loader import DataLoader
+
+# Load processed data
+df = DataLoader.load_processed_data("warriors_historical_2015_16_to_2024_25_processed.csv")
+
+# Initialize model
+model = RandomForestModel(model_type="classification")
+
+# Train model
 trainer = ModelTrainer(model)
+X_train, X_test, y_train, y_test = trainer.prepare_data(df, feature_cols, 'WIN')
 trainer.train_model(X_train, y_train)
+metrics = trainer.evaluate_model(X_test, y_test)
+
+# Save model
+model.save()
 ```
 
 ### 4. Incremental Updates
@@ -101,17 +144,47 @@ updater.update_model(historical_data, new_games, feature_cols, target_col)
 
 ## Model Types
 
-- Classification: Win/Loss prediction
-- Regression: Point differential prediction
+### Available Models
+- **Random Forest**: Ensemble tree-based model
+- **XGBoost**: Gradient boosting model
+- **LightGBM**: Light gradient boosting model
+
+### Prediction Tasks
+- **Classification**: Win/Loss prediction
+- **Regression**: Point differential prediction
+
+All models support both classification and regression tasks and are automatically saved to the `models/` directory after training.
+
+## Model Training Results
+
+The training script trains multiple models and provides evaluation metrics:
+
+- **Classification Models**: Accuracy, precision, recall, F1-score
+- **Regression Models**: RMSE, R² score
+- **Feature Importance**: Top 10 most important features for each model
+
+Models are saved with versioning in the `models/` directory and can be loaded for predictions.
+
+## Model Optimization
+
+The `optimize_models.py` script provides comprehensive model optimization:
+
+1. **Baseline Models**: Trains models with default hyperparameters
+2. **Hyperparameter Tuning**: Uses GridSearchCV with cross-validation to find optimal parameters
+3. **Feature Selection**: Implements two methods:
+   - Feature importance-based selection
+   - SelectKBest statistical selection
+4. **Performance Comparison**: Compares baseline vs. tuned vs. tuned+feature-selected models
+5. **Cross-Validation**: Uses TimeSeriesSplit for robust evaluation (respects temporal order)
+
+The optimization script automatically saves the best-performing model for each algorithm.
 
 ## Next Steps
 
-1. Collect historical Warriors data
-2. Perform exploratory data analysis
-3. Engineer and select features
-4. Train initial models
-5. Implement incremental learning pipeline
-6. Set up automated updates for current season
+1. Implement incremental learning pipeline
+2. Set up automated updates for current season
+3. Hyperparameter tuning and model optimization
+4. Create prediction pipeline for upcoming games
 
 ## Notes
 
