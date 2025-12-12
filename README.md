@@ -248,9 +248,10 @@ Game 1:
 
 ## Next Steps
 
-1. Implement incremental learning pipeline
-2. Set up automated updates for current season
-3. Create prediction accuracy tracking system
+1. Enhance the feature engineering to add more variation to the predictions -- Regression predictions lack diversity due to limited feature variation for upcoming games. To improve this, we could add opponent strength features or other contextual information.
+2. Implement incremental learning pipeline
+3. Set up automated updates for current season
+4. Create prediction accuracy tracking system
 
 ## Notes
 
