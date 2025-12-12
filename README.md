@@ -126,7 +126,42 @@ metrics = trainer.evaluate_model(X_test, y_test)
 model.save()
 ```
 
-### 4. Incremental Updates
+### 4. Making Predictions
+
+**Using the prediction script:**
+```bash
+# Make predictions for upcoming games (classification and regression)
+python predict_games.py --task both
+
+# Make only win/loss predictions
+python predict_games.py --task classification
+
+# Make only point differential predictions
+python predict_games.py --task regression
+
+# Demo mode (use last game as test case)
+python predict_games.py --demo --task classification
+
+# Specify custom parameters
+python predict_games.py --model xgboost --days-ahead 7 --task both
+```
+
+**Using the Python API:**
+```python
+from src.models.base_model import BaseModel
+import joblib
+
+# Load a trained model
+model = joblib.load('models/xgboost_fs_selectkbest_classification_v1.0.joblib')
+model = model['model']  # Extract the model from saved data
+
+# Prepare features for upcoming game
+# (Use feature engineering pipeline)
+predictions = model.predict(X_features)
+probabilities = model.predict_proba(X_features)
+```
+
+### 5. Incremental Updates
 
 ```python
 from src.models.incremental_updater import IncrementalUpdater
@@ -179,12 +214,43 @@ The `optimize_models.py` script provides comprehensive model optimization:
 
 The optimization script automatically saves the best-performing model for each algorithm.
 
+## Prediction Pipeline
+
+The `predict_games.py` script provides a complete prediction pipeline:
+
+1. **Schedule Fetching**: Automatically fetches upcoming games from NBA API schedule
+2. **Model Loading**: Automatically finds and loads the best trained models
+3. **Feature Engineering**: Engineers features for upcoming games using historical data
+4. **Predictions**: Makes win/loss and point differential predictions
+5. **Output**: Saves predictions in CSV and human-readable text format
+
+**Key Features:**
+- **NBA Schedule API Integration**: Automatically fetches upcoming games from NBA API
+- Automatically uses optimized models (tuned + feature selection)
+- Handles upcoming games without results
+- Uses historical data to calculate rolling features
+- Provides win probabilities and point differential predictions
+- Falls back to current season data file if API unavailable
+- Demo mode for testing with recent games
+
+**Output Files:**
+- `predictions_<model>_<timestamp>.csv`: Detailed predictions in CSV format
+- `predictions_summary_<timestamp>.txt`: Human-readable summary report
+
+**Example Output:**
+```
+Game 1:
+  Date: 2025-12-12
+  Matchup: GSW vs. MIN
+  Prediction: Win
+  Win Probability: 51.9%
+```
+
 ## Next Steps
 
 1. Implement incremental learning pipeline
 2. Set up automated updates for current season
-3. Hyperparameter tuning and model optimization
-4. Create prediction pipeline for upcoming games
+3. Create prediction accuracy tracking system
 
 ## Notes
 

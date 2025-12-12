@@ -2,7 +2,7 @@
 NBA API client for fetching game data and statistics.
 """
 
-from nba_api.stats.endpoints import teamgamelog, boxscoretraditionalv3
+from nba_api.stats.endpoints import teamgamelog, boxscoretraditionalv3, scheduleleaguev2
 from nba_api.stats.static import teams
 import pandas as pd
 import numpy as np
@@ -271,4 +271,177 @@ class NBAApiClient:
     
     def get_team_name(self) -> str:
         return self.team_info.get('full_name', 'Unknown')
+    
+    def get_team_schedule(
+        self, 
+        season: str = None,
+        season_type: str = "Regular Season"
+    ) -> pd.DataFrame:
+        """
+        Get team schedule including upcoming games.
+        
+        Args:
+            season: Season string (e.g., "2025-26"). If None, uses current season.
+            season_type: "Regular Season" or "Playoffs"
+        
+        Returns:
+            DataFrame with team schedule including upcoming games
+        """
+        try:
+            # If season not provided, try to infer from current date
+            if season is None:
+                from datetime import datetime
+                current_year = datetime.now().year
+                
+                if datetime.now().month >= 10:
+                    season = f"{current_year}-{str(current_year + 1)[-2:]}"
+                else:
+                    season = f"{current_year - 1}-{str(current_year)[-2:]}"
+            
+            # Use ScheduleLeagueV2 to get full league schedule, then filter for GSW
+            # Note: ScheduleLeagueV2 uses different parameter names
+            schedule = scheduleleaguev2.ScheduleLeagueV2(
+                season=season,
+                league_id='00'  # NBA league ID
+            )
+            df = schedule.get_data_frames()[0]
+            
+            if df.empty:
+                return pd.DataFrame()
+            
+            # Filter for GSW's games using the correct column names
+            team_abbrev = self.team_info.get('abbreviation', 'GSW')
+            team_name = self.team_info.get('full_name', 'Golden State Warriors')
+            
+            # Filter for games where GSW is either home or away
+            # ScheduleLeagueV2 uses: homeTeam_teamId, awayTeam_teamId, homeTeam_teamName, awayTeam_teamName
+            team_games = df[
+                (df['homeTeam_teamId'] == self.team_id) |
+                (df['awayTeam_teamId'] == self.team_id) |
+                (df['homeTeam_teamName'].str.contains('Warriors', case=False, na=False)) |
+                (df['awayTeam_teamName'].str.contains('Warriors', case=False, na=False))
+            ].copy()
+            
+            # Standardize column names
+            if 'gameDate' in team_games.columns:
+                team_games['GAME_DATE'] = pd.to_datetime(team_games['gameDate'], errors='coerce')
+            elif 'gameDateEst' in team_games.columns:
+                team_games['GAME_DATE'] = pd.to_datetime(team_games['gameDateEst'], errors='coerce')
+            elif 'GAME_DATE' in team_games.columns:
+                team_games['GAME_DATE'] = pd.to_datetime(team_games['GAME_DATE'], errors='coerce')
+            
+            # Create MATCHUP column
+            if 'MATCHUP' not in team_games.columns:
+                team_games['MATCHUP'] = team_games.apply(
+                    lambda row: f"{team_abbrev} vs. {row.get('awayTeam_teamTricode', row.get('awayTeam_teamName', 'Unknown'))}" 
+                    if row.get('homeTeam_teamId') == self.team_id or 'Warriors' in str(row.get('homeTeam_teamName', ''))
+                    else f"{team_abbrev} @ {row.get('homeTeam_teamTricode', row.get('homeTeam_teamName', 'Unknown'))}",
+                    axis=1
+                )
+            
+            # Add season info
+            team_games['SEASON'] = season
+            team_games['SEASON_TYPE'] = season_type
+            
+            # Add Team_ID and Game_ID if available
+            if 'gameId' in team_games.columns:
+                team_games['Game_ID'] = team_games['gameId']
+            elif 'GAME_ID' in team_games.columns:
+                team_games['Game_ID'] = team_games['GAME_ID']
+            team_games['Team_ID'] = self.team_id
+            
+            time.sleep(self.delay)
+            return team_games
+        except Exception as e:
+            print(f"Error fetching team schedule for {season} ({season_type}): {e}")
+            import traceback
+            traceback.print_exc()
+            time.sleep(self.delay)
+            return pd.DataFrame()
+    
+    def get_upcoming_games(
+        self,
+        season: str = None,
+        days_ahead: int = 14,
+        season_type: str = "Regular Season"
+    ) -> pd.DataFrame:
+        """
+        Get upcoming games for the team.
+        
+        Args:
+            season: Season string. If None, uses current season.
+            days_ahead: Number of days ahead to look for games
+            season_type: "Regular Season" or "Playoffs"
+        
+        Returns:
+            DataFrame with upcoming games (formatted like game log for compatibility)
+        """
+        schedule = self.get_team_schedule(season, season_type)
+        
+        if schedule.empty:
+            return pd.DataFrame()
+        
+        # Convert date column
+        if 'GAME_DATE' in schedule.columns:
+            schedule['GAME_DATE'] = pd.to_datetime(schedule['GAME_DATE'])
+        elif 'GAME_DATE_EST' in schedule.columns:
+            schedule['GAME_DATE'] = pd.to_datetime(schedule['GAME_DATE_EST'])
+        
+        # Get today's date
+        from datetime import datetime, timedelta
+        today = datetime.now().date()
+        future_date = today + timedelta(days=days_ahead)
+        
+        # Filter for upcoming games (future dates or no result)
+        upcoming = schedule[
+            (schedule['GAME_DATE'].dt.date >= today) &
+            (schedule['GAME_DATE'].dt.date <= future_date)
+        ].copy()
+        
+        # Also include games without results if WL column exists
+        if 'WL' in schedule.columns:
+            no_result = schedule[
+                schedule['WL'].isna() | 
+                (schedule['WL'] == '') |
+                (schedule['WL'].astype(str).str.strip() == '')
+            ]
+            if not no_result.empty:
+                upcoming = pd.concat([upcoming, no_result]).drop_duplicates(
+                    subset=['GAME_ID'] if 'GAME_ID' in schedule.columns else ['GAME_DATE'],
+                    keep='first'
+                )
+        
+        # Format matchup if needed - schedule API might have different column names
+        if 'MATCHUP' not in upcoming.columns:
+            # Try different possible column name combinations
+            if 'VISITOR_TEAM_NAME' in upcoming.columns and 'HOME_TEAM_NAME' in upcoming.columns:
+                team_abbrev = self.team_info.get('abbreviation', 'GSW')
+                upcoming['MATCHUP'] = upcoming.apply(
+                    lambda row: f"{team_abbrev} vs. {row['HOME_TEAM_NAME']}" 
+                    if str(row.get('HOME_TEAM_NAME', '')).find('Warriors') >= 0 or str(row.get('HOME_TEAM_NAME', '')).find(team_abbrev) >= 0
+                    else f"{team_abbrev} @ {row['VISITOR_TEAM_NAME']}" 
+                    if str(row.get('VISITOR_TEAM_NAME', '')).find('Warriors') >= 0 or str(row.get('VISITOR_TEAM_NAME', '')).find(team_abbrev) >= 0
+                    else f"{row.get('VISITOR_TEAM_NAME', 'Unknown')} @ {row.get('HOME_TEAM_NAME', 'Unknown')}",
+                    axis=1
+                )
+            elif 'MATCHUP' in schedule.columns:
+                # Copy from original if it exists
+                upcoming['MATCHUP'] = schedule.loc[upcoming.index, 'MATCHUP'] if len(upcoming) > 0 else ''
+        
+        # Ensure we have required columns for compatibility with game log format
+        # Add missing columns with default values for upcoming games
+        required_cols = ['Team_ID', 'Game_ID', 'GAME_DATE', 'MATCHUP', 'SEASON', 'SEASON_TYPE']
+        for col in required_cols:
+            if col not in upcoming.columns:
+                if col == 'Team_ID':
+                    upcoming['Team_ID'] = self.team_id
+                elif col == 'Game_ID':
+                    # Generate placeholder game IDs if not available
+                    upcoming['Game_ID'] = upcoming.index.astype(str)
+                elif col in ['SEASON', 'SEASON_TYPE']:
+                    upcoming[col] = season if col == 'SEASON' else season_type
+                else:
+                    upcoming[col] = None
+        
+        return upcoming.sort_values('GAME_DATE').reset_index(drop=True)
 
